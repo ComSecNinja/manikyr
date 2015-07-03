@@ -18,11 +18,7 @@ const thumbAlgo		= imaging.NearestNeighbor
 
 func removeThumb(filePath string) {
 	thumbPath := path.Join(path.Dir(filePath), thumbDir, path.Base(filePath))
-	err := os.Remove(thumbPath)
-	if err != nil {
-		log.Println(err.Error())
-		return
-	}
+	os.Remove(thumbPath)
 }
 
 func createThumb(filePath string) {
@@ -109,24 +105,20 @@ func Watch(root string) {
 					log.Println(err.Error())
 					continue
 				}
-
-				switch mode := info.Mode(); {
-				case mode.IsDir():
-					// Watch the new dir if it's first-level
-					if matchesSubpath(root, "*", evt.Name) {
-						w.Add(evt.Name)
-					}
-				case mode.IsRegular():
+				
+				mode := info.Mode()
+				if mode.IsDir() && matchesSubpath(root, "*", evt.Name) {
+					// Watch the file if it's a first-level directory
+					w.Add(evt.Name)	
+				} else if mode.IsRegular() && matchesSubpath(root, "*/*", evt.Name) {
 					// Create thumbnail if the file is second-level regular
-					if matchesSubpath(root, "*/*", evt.Name) {
-						go createThumb(evt.Name)
-					}
+					go createThumb(evt.Name)
 				}
 			} else {
 				// Something else happened to the file
-				if _, err := os.Stat(evt.Name); os.IsNotExist(err) { // If file is gone
-					// Try to delete thumb
-					if matchesSubpath(root, "*/*", evt.Name) {
+				if matchesSubpath(root, "*/*", evt.Name) {
+					if _, err := os.Stat(evt.Name); os.IsNotExist(err) { // If file is gone
+						// Try to delete thumb
 						go removeThumb(evt.Name)
 					}
 				}
