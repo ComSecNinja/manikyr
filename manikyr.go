@@ -2,7 +2,6 @@ package manikyr
 
 import (
 	"errors"
-	"image"
 	"os"
 	"path"
 
