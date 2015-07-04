@@ -15,28 +15,28 @@ var (
 	ErrRootExist 		= errors.New("root already exists")
 
 	NearestNeighbor		= imaging.NearestNeighbor
-	Box					= imaging.Box
-	Linear				= imaging.Linear
-	Hermite				= imaging.Hermite
+	Box			= imaging.Box
+	Linear			= imaging.Linear
+	Hermite			= imaging.Hermite
 	MitchellNetravali	= imaging.MitchellNetravali
-	CatmullRom			= imaging.CatmullRom
-	BSpline				= imaging.BSpline
-	Gaussian			= imaging.Gaussian
-	Bartlett			= imaging.Bartlett
-	Lanczos				= imaging.Lanczos
-	Hann				= imaging.Hann
-	Hamming				= imaging.Hamming
-	Blackman			= imaging.Blackman
-	Welch				= imaging.Welch
-	Cosine				= imaging.Cosine
+	CatmullRom		= imaging.CatmullRom
+	BSpline			= imaging.BSpline
+	Gaussian		= imaging.Gaussian
+	Bartlett		= imaging.Bartlett
+	Lanczos			= imaging.Lanczos
+	Hann			= imaging.Hann
+	Hamming			= imaging.Hamming
+	Blackman		= imaging.Blackman
+	Welch			= imaging.Welch
+	Cosine			= imaging.Cosine
 )
 
 type Manikyr struct {
-	roots				map[string]*fsnotify.Watcher
+	roots			map[string]*fsnotify.Watcher
 	thumbDirPerms		os.FileMode
-	thumbWidth			int
-	thumbHeight			int
-	thumbAlgo			imaging.ResampleFilter
+	thumbWidth		int
+	thumbHeight		int
+	thumbAlgo		imaging.ResampleFilter
 	ThumbDirGetter		func(string) string
 	ThumbNameGetter		func(string) string
 	ShouldCreateThumb	func(string, string) bool
@@ -181,8 +181,17 @@ func (m *Manikyr) SetThumbSize(w, h int) {
 	}
 	m.thumbHeight = h
 }
+func (m *Manikyr) ThumbDirFileMode() uint32 {
+	return uint32(m.thumbDirPerms)
+}
 func (m *Manikyr) SetThumbDirFileMode(fm uint32) {
 	m.thumbDirPerms = os.FileMode(fm)
+}
+func (m *Manikyr) ThumbAlgorithm() imaging.ResampleFilter {
+	return m.thumbAlgo
+}
+func (m *Manikyr) SetThumbAlgorithm(filter imaging.ResampleFilter) {
+	m.thumbAlgo = filter
 }
 
 func New() *Manikyr {
