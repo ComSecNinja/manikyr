@@ -78,7 +78,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 	}
 	m.roots[root].Close()
 	delete(m.roots, root)
-	delete(m.errChans, m.errChans[root])
+	delete(m.errChans, root)
 	return nil
 }
 func (m *Manikyr) watch(root string, errChan chan error) {
@@ -213,8 +213,8 @@ func New() *Manikyr {
 			return path.Base(parentFile)
 		},
 		ShouldCreateThumb: func(root, parentFile string) bool {
-			ok, _ := NthSubdir(root, parentFile, 0)
-			if NthSubdir(root, parentFile, 1) {
+			ok, _ := NthSubdir(root, parentFile, 1)
+			if ok {
 				return true
 			}
 			return false
