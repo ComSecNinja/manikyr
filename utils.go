@@ -22,6 +22,6 @@ func Subdirectories(root string) ([]string, error) {
 	return dirs, nil
 }
 
-func NthSubdir(root, dir string, n int) bool {
+func NthSubdir(root, dir string, n int) (bool, error) {
 	return path.Match(path.Join(root, "*" + strings.Repeat("/*", n)), dir)
 }
