@@ -33,6 +33,7 @@ var (
 
 type Manikyr struct {
 	roots			map[string]*fsnotify.Watcher
+	errChans		map[string]chan error
 	thumbDirPerms		os.FileMode
 	thumbWidth		int
 	thumbHeight		int
@@ -62,6 +63,7 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 	}
 
 	m.roots[root] = w
+	m.errChans[root] = errChan
 	go m.watch(root, errChan)
 
 	err = m.roots[root].Add(root)
@@ -76,6 +78,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 	}
 	m.roots[root].Close()
 	delete(m.roots, root)
+	delete(m.errChans, m.errChans[root])
 	return nil
 }
 func (m *Manikyr) watch(root string, errChan chan error) {
@@ -198,6 +201,7 @@ func New() *Manikyr {
 	// Sensible defaults
 	return &Manikyr{
 		roots:			make(map[string]*fsnotify.Watcher),
+		errChans:		make(map[string]chan error),
 		thumbWidth: 		100,
 		thumbHeight: 		100,
 		thumbAlgo:		NearestNeighbor,
@@ -209,13 +213,15 @@ func New() *Manikyr {
 			return path.Base(parentFile)
 		},
 		ShouldCreateThumb: func(root, parentFile string) bool {
+			ok, _ := NthSubdir(root, parentFile, 0)
 			if NthSubdir(root, parentFile, 1) {
 				return true
 			}
 			return false
 		},
 		ShouldWatchSubdir: func(root, parentFile string) bool {
-			if NthSubdir(root, parentFile, 0) && parentFile[0] != '.' {
+			ok, _ := NthSubdir(root, parentFile, 0)
+			if ok && parentFile[0] != '.' {
 				return true
 			}
 			return false
