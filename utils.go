@@ -12,7 +12,7 @@ import (
 
 func openImageWhenReady(file string) (image.Image, error) {
 	// Retry opening the image until err != image.ErrFormat
-	// or next retry would take over a minute.
+	// or the next retry would take over a minute.
 	// FIXME
 	
 	var img image.Image
@@ -46,7 +46,7 @@ func Subdirectories(root string) ([]string, error) {
 	}
 	for _, file := range files {
 		if file.IsDir() {
-			dirs = append(dirs, file.Name())
+			dirs = append(dirs, path.Join(root, file.Name()))
 		}
 	}
 
