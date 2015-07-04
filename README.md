@@ -1,5 +1,6 @@
 # manikyr
-Automate batch thumbnailing in picshur. 
+Automate batch thumbnailing in filesystems.  
+Any root directory currently watched should **not** be removed or renamed.
 
 Here's an ugly and **obsolete** graph of the functionality:
 
