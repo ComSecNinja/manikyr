@@ -37,6 +37,7 @@ type Manikyr struct {
 	roots			map[string]*fsnotify.Watcher
 	subdirs			map[string][]string
 	errChans		map[string]chan error
+	doneChans		map[string]chan bool
 	thumbDirPerms		os.FileMode
 	thumbWidth		int
 	thumbHeight		int
@@ -64,28 +65,30 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 	if err != nil {
 		return err
 	}
+	
+	doneChan := make(chan bool)
 
 	m.roots[root] = w
 	m.errChans[root] = errChan
-	go m.watch(root, errChan)
+	m.doneChans[root] = doneChan
+	go m.watch(root, errChan, doneChan)
 
-	err = m.roots[root].Add(root)
-	if err != nil {
-		return err
-	}
-	return nil
+	return m.roots[root].Add(root)
 }
 func (m *Manikyr) RemoveRoot(root string) error {
 	if _, ok := m.roots[root]; !ok {
 		return ErrRootNotWatched
 	}
 	m.roots[root].Close()
+	m.doneChans[root] <-true
+
 	delete(m.roots, root)
 	delete(m.errChans, root)
+	delete(m.doneChans, root)
 	delete(m.subdirs, root)
 	return nil
 }
-func (m *Manikyr) watch(root string, errChan chan error) {
+func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 	w, ok := m.roots[root]
 	if !ok {
 		errChan <-ErrRootNotWatched
@@ -131,6 +134,8 @@ func (m *Manikyr) watch(root string, errChan chan error) {
 			}
 		case err := <- w.Errors:
 			errChan <-err
+		case done := <- doneChan:
+			break
 		}
 	}
 }
@@ -159,11 +164,7 @@ func (m *Manikyr) RemoveSubdir(root, subdir string) error {
 	for i := range m.subdirs[root] {
 		if m.subdirs[root][i] == subdir {
 			m.subdirs[root] = append(m.subdirs[root][:i], m.subdirs[root][i+1:]...) // Keep indexes <i || >i
-			err := m.roots[root].Remove(subdir)
-			if err != nil {
-				return err
-			}
-			return nil
+			return m.roots[root].Remove(subdir)
 		}
 	}
 	return ErrSubdirNotWatched
@@ -216,7 +217,6 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 	thumbPath := path.Join(localThumbs, m.ThumbNameGetter(parentFile))
 	if err = imaging.Save(thumb, thumbPath); err != nil {
 		errChan <-err
-		return
 	}
 }
 func (m *Manikyr) ThumbSize() (int, int) {
@@ -254,6 +254,7 @@ func New() *Manikyr {
 		roots:			make(map[string]*fsnotify.Watcher),
 		subdirs:		make(map[string][]string),
 		errChans:		make(map[string]chan error),
+		doneChans:		make(map[string]chan bool),
 		thumbWidth: 		100,
 		thumbHeight: 		100,
 		thumbAlgo:		NearestNeighbor,
