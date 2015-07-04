@@ -1,15 +1,13 @@
-# manikyr
-Specializes in thumbs.
-
+# manikyr: A thumb specialist
 Automate image thumbnailing.  
-Any root directory currently watched should **not** be removed or renamed.
+Root directories should be unwatched prior to renaming or removing.
 
 ## Installation
 `go get github.com/ComSecNinja/manikyr`
 
 ## Usage
-The next example watches `/home/timo/picshur/` and any direct child directory (`/home/timo/picshur/*/`) for changes.  
-If a new image file is created (by e.g. copying) in one of the direct child directories, manikyr automatically creates a thumbnail to `/home/timo/picshur/*/thumb` with the same name as the original file.  
+The next example watches `/home/timo/picshur-test/` and any direct child directory (`/home/timo/picshur-test/*/`) for changes.  
+If a new image file is created (by e.g. copying) in one of the direct child directories, manikyr automatically creates a thumbnail to `/home/timo/picshur-test/*/thumb` with the same name as the original file.  
 If a file is deleted in a direct child directory and a file with the same name is present in the designated thumbnail directory, it gets deleted.  
 Deleting direct child directories automatically unwatches them so you do not need to worry about that.
 ```
@@ -23,7 +21,6 @@ import (
 const myRoot = "/home/timo/picshur-test"
 
 func main() {
-	// Create a new manikyr.Manikyr instance
 	mk := manikyr.New()
 
 	// Thumbnail directory is {root}/{gallery}/thumbs
@@ -31,7 +28,7 @@ func main() {
 		return path.Join(path.Dir(p), "thumbs")
 	}
 
-	// Create chan to receive and print errors
+	// Create chan to receive errors
 	rootErrChan := make(chan error)
 
 	// Add our root directory which holds the gallery directories
@@ -56,10 +53,8 @@ func main() {
 
 	println("Manikyr ready)
 	for {
-		for {
-			if err := <-rootErrChan; err != nil {
-				println(err.Error())
-			}
+		if err := <-rootErrChan; err != nil {
+			println(err.Error())
 		}
 	}
 }
