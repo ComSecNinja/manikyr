@@ -254,7 +254,7 @@ func New() *Manikyr {
 		thumbAlgo:		NearestNeighbor,
 		thumbDirPerms:		0777,
 		ThumbDirGetter: func(parentFile string) string {
-			return path.Join(path.Dir(parentFile), ".thumbs")
+			return os.TempDir()
 		},
 		ThumbNameGetter: func(parentFile string) string {
 			return path.Base(parentFile)
