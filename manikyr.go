@@ -89,6 +89,7 @@ func (m *Manikyr) watch(root string, errChan chan error) {
 	w, ok := m.roots[root]
 	if !ok {
 		errChan <-ErrRootNotWatched
+		return
 	}
 
 	defer w.Close()
