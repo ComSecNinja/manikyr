@@ -1,7 +1,7 @@
 # manikyr
 Automate batch thumbnailing in picshur. 
 
-Here's an ugly graph of the functionality:
+Here's an ugly and **obsolete** graph of the functionality:
 
 ```
              Event has a type and a path ($NAME)                                                                     
