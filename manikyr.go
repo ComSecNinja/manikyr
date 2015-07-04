@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrRootNotExist 	= errors.New("root does not exist")
-	ErrRootExist 		= errors.New("root already exists")
+	ErrRootNotWatched 	= errors.New("root is not watched")
+	ErrRootWatched 		= errors.New("root is already watched")
 	ErrSubdirNotWatched	= errors.New("subdir is not watched")
 	ErrSubdirWatched	= errors.New("subdir is already watched")
 
@@ -57,7 +57,7 @@ func (m *Manikyr) Roots() []string {
 }
 func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 	if _, ok := m.roots[root]; ok {
-		return ErrRootExist
+		return ErrRootWatched
 	}
 
 	w, err := fsnotify.NewWatcher()
@@ -77,7 +77,7 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 }
 func (m *Manikyr) RemoveRoot(root string) error {
 	if _, ok := m.roots[root]; !ok {
-		return ErrRootNotExist
+		return ErrRootNotWatched
 	}
 	m.roots[root].Close()
 	delete(m.roots, root)
@@ -88,7 +88,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 func (m *Manikyr) watch(root string, errChan chan error) {
 	w, ok := m.roots[root]
 	if !ok {
-		errChan <-ErrRootNotExist
+		errChan <-ErrRootNotWatched
 	}
 
 	defer w.Close()
@@ -135,7 +135,7 @@ func (m *Manikyr) watch(root string, errChan chan error) {
 }
 func (m *Manikyr) AddSubdir(root, subdir string) error {
 	if _, ok := m.roots[root]; !ok {
-		return ErrRootNotExist
+		return ErrRootNotWatched
 	}
 	for i := range m.subdirs[root] {
 		if m.subdirs[root][i] == subdir {
@@ -152,7 +152,7 @@ func (m *Manikyr) AddSubdir(root, subdir string) error {
 }
 func (m *Manikyr) RemoveSubdir(root, subdir string) error {
 	if _, ok := m.roots[root]; !ok {
-		return ErrRootNotExist
+		return ErrRootNotWatched
 	}
 
 	for i := range m.subdirs[root] {
@@ -171,7 +171,7 @@ func (m *Manikyr) Subdirs(root string) ([]string, error) {
 	subdirs := make([]string, len(m.subdirs[root]))
 	
 	if _, ok := m.roots[root]; !ok {
-		return subdirs, ErrRootNotExist
+		return subdirs, ErrRootNotWatched
 	}
 	
 	for i := range m.subdirs[root] {
