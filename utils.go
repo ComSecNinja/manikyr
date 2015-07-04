@@ -24,7 +24,7 @@ func openImageWhenReady(file string) (image.Image, error) {
 		t = time.Duration(1000 * (retry * 2))
 		time.Sleep(time.Millisecond * t)
 
-		img, err = imaging.Open(parentFile)
+		img, err = imaging.Open(file)
 		if err == image.ErrFormat {
 			retry = retry + 1
 			if retry*2 > 60 {
@@ -32,9 +32,9 @@ func openImageWhenReady(file string) (image.Image, error) {
 			}
 			continue
 		}
-		return img, err
+		break
 	}
-	
+	return img, err
 }
 
 func Subdirectories(root string) ([]string, error) {
