@@ -249,8 +249,8 @@ func New() *Manikyr {
 		subdirs:		make(map[string][]string),
 		errChans:		make(map[string]chan error),
 		doneChans:		make(map[string]chan bool),
-		thumbWidth: 		100,
-		thumbHeight: 		100,
+		thumbWidth: 		128,
+		thumbHeight: 		128,
 		thumbAlgo:		NearestNeighbor,
 		thumbDirPerms:		0777,
 		ThumbDirGetter: func(parentFile string) string {
