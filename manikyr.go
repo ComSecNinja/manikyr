@@ -1,8 +1,8 @@
 package manikyr
 
 import (
-	"io/ioutil"
-	"log"
+	"errors"
+	"image"
 	"os"
 	"path"
 
@@ -10,89 +10,81 @@ import (
 	"github.com/disintegration/imaging"
 )
 
-const thumbDir		= ".thumbs"
-const thumbDirPerms	= 0777
-const thumbWidth	= 100
-const thumbHeight	= 100
-const thumbAlgo		= imaging.NearestNeighbor
+var (
+	ErrRootNotExist 	= errors.New("root does not exist")
+	ErrRootExist 		= errors.New("root already exists")
 
-func removeThumb(filePath string) {
-	thumbPath := path.Join(path.Dir(filePath), thumbDir, path.Base(filePath))
-	os.Remove(thumbPath)
+	NearestNeighbor		= imaging.NearestNeighbor
+	Box					= imaging.Box
+	Linear				= imaging.Linear
+	Hermite				= imaging.Hermite
+	MitchellNetravali	= imaging.MitchellNetravali
+	CatmullRom			= imaging.CatmullRom
+	BSpline				= imaging.BSpline
+	Gaussian			= imaging.Gaussian
+	Bartlett			= imaging.Bartlett
+	Lanczos				= imaging.Lanczos
+	Hann				= imaging.Hann
+	Hamming				= imaging.Hamming
+	Blackman			= imaging.Blackman
+	Welch				= imaging.Welch
+	Cosine				= imaging.Cosine
+)
+
+type Manikyr struct {
+	roots				map[string]*fsnotify.Watcher
+	thumbDirPerms		os.FileMode
+	thumbWidth			int
+	thumbHeight			int
+	thumbAlgo			imaging.ResampleFilter
+	ThumbDirGetter		func(string) string
+	ThumbNameGetter		func(string) string
+	ShouldCreateThumb	func(string, string) bool
+	ShouldWatchSubdir	func(string, string) bool
 }
-
-func createThumb(filePath string) {
-	localThumbs := path.Join(path.Dir(filePath), thumbDir)
-	thumbPath := path.Join(localThumbs, path.Base(filePath))
-
-	img, err := imaging.Open(filePath)
-	if err == image.ErrFormat {
-		// There is a chance that the file is not yet completely created.
-		// We need some sort of retry/wait functionality in here for production use.
-		log.Println(err.Error())
-		continue
+func (m *Manikyr) Roots() []string {
+	keys := make([]string, len(m.roots))
+	i := 0
+	for k := range m.roots {
+		keys[i] = k
+		i = i + 1
 	}
-	if err != nil {
-		log.Println(err.Error())
-		continue
-	}
-
-	thumb := imaging.Thumbnail(img, thumbWidth, thumbHeight, thumbAlgo)
-
-	_, err := os.Stat(localThumbs)
-	if os.IsNotExist(err) {
-		// Create a dir to hold thumbnails
-		err := os.Mkdir(localThumbs, thumbDirPerms)
-		if err != nil {
-			log.Println(err.Error())
-		}
-	}
-
-	// Save the thumbnail
-	if err = imaging.Save(thumb, thumbPath); err != nil {
-		log.Println(err.Error())
-	}
+	return keys
 }
-
-func matchesSubpath(root, subpath, name string) bool {
-	ok, err := path.Match(path.Join(root, subpath), name)
-	if err != nil {
-		log.Println(err.Error())
+func (m *Manikyr) AddRoot(root string, errChan chan error) error {
+	if _, ok := m.roots[root]; ok {
+		return ErrRootExist
 	}
-	return ok
-}
 
-func Watch(root string) {
-	// Create watcher
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
-		panic(err)
-	} 
+		return err
+	}
+
+	m.roots[root] = w
+	go m.watch(root, errChan)
+
+	err = m.roots[root].Add(root)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (m *Manikyr) RemoveRoot(root string) error {
+	if _, ok := m.roots[root]; !ok {
+		return ErrRootNotExist
+	}
+	m.roots[root].Close()
+	delete(m.roots, root)
+	return nil
+}
+func (m *Manikyr) watch(root string, errChan chan error) {
+	w, ok := m.roots[root]
+	if !ok {
+		errChan <-ErrRootNotExist
+	}
+
 	defer w.Close()
-
-	// Watch root dir
-	err = w.Add(picshurRoot)
-	if err != nil {
-		panic(err)
-	}
-
-	// Watch subdirectories
-	files, err := ioutil.ReadDir(root)
-	if err != nil {
-		panic(err)
-	}
-	for _, file := range files {
-		// "assets" contains scripts and styles for webpage
-		// so we'll exclude that
-		if file.IsDir() && file.Name != "assets" {
-			err := w.Add(path.Join(root, file.Name()))
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-
-	// Event loop
 	for {
 		select {
 		case evt := <- w.Events:
@@ -102,29 +94,122 @@ func Watch(root string) {
 				// Get some info about the file
 				info, err := os.Stat(evt.Name)
 				if os.IsNotExist(err) {
-					log.Println(err.Error())
+					errChan <-err
 					continue
 				}
-				
-				mode := info.Mode()
-				if mode.IsDir() && matchesSubpath(root, "*", evt.Name) {
-					// Watch the file if it's a first-level directory
-					w.Add(evt.Name)	
-				} else if mode.IsRegular() && matchesSubpath(root, "*/*", evt.Name) {
-					// Create thumbnail if the file is second-level regular
-					go createThumb(evt.Name)
+
+				switch mode := info.Mode(); {
+				case mode.IsDir():
+					if m.ShouldWatchSubdir(root, evt.Name) {
+						w.Add(evt.Name)
+					}
+				case mode.IsRegular():
+					if m.ShouldCreateThumb(root, evt.Name) {
+						go m.createThumb(evt.Name, errChan)
+					}
 				}
 			} else {
 				// Something else happened to the file
-				if matchesSubpath(root, "*/*", evt.Name) {
-					if _, err := os.Stat(evt.Name); os.IsNotExist(err) { // If file is gone
-						// Try to delete thumb
-						go removeThumb(evt.Name)
-					}
+				_, err := os.Stat(evt.Name)
+				if os.IsNotExist(err) {
+					// Try to delete thumb.
+					// Error is useless here because the file could
+					// have been a directory or a non-image file.
+					m.removeThumb(evt.Name)
+				} else if err != nil {
+					errChan <-err
+					continue
 				}
 			}
 		case err := <- w.Errors:
-			log.Println(err.Error())
+			errChan <-err
 		}
+	}
+}
+func (m *Manikyr) removeThumb(parentFile string) error {
+	thumbPath := path.Join(m.ThumbDirGetter(parentFile), m.ThumbNameGetter(parentFile))
+	return os.Remove(thumbPath)
+}
+func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
+	img, err := imaging.Open(parentFile)
+	if err == image.ErrFormat {
+		// There is a chance that the file is not yet completely created.
+		// We need some sort of retry/wait functionality in here for production use.
+		errChan <-err
+		return
+	} else if err != nil {
+		errChan <-err
+		return
+	}
+
+	localThumbs := m.ThumbDirGetter(parentFile)
+	_, err = os.Stat(localThumbs)
+	// If thumbDir does not exist...
+	if os.IsNotExist(err) {
+		// ..create it
+		err := os.Mkdir(localThumbs, m.thumbDirPerms)
+		if err != nil {
+			errChan <-err
+			return
+		}
+	} else if err != nil {
+		errChan <-err
+		return
+	}
+
+	// Save the thumbnail
+	thumb := imaging.Thumbnail(img, m.thumbWidth, m.thumbHeight, m.thumbAlgo)
+	thumbPath := path.Join(localThumbs, m.ThumbNameGetter(parentFile))
+	if err = imaging.Save(thumb, thumbPath); err != nil {
+		errChan <-err
+		return
+	}
+}
+func (m *Manikyr) ThumbSize() (int, int) {
+	return m.thumbWidth, m.thumbHeight
+}
+func (m *Manikyr) SetThumbSize(w, h int) {
+	// Dimensions must be positive
+
+	if w < 1 {
+		w = 1
+	}
+	m.thumbWidth = w
+
+	if h < 1 {
+		h = 1
+	}
+	m.thumbHeight = h
+}
+func (m *Manikyr) SetThumbDirFileMode(fm uint32) {
+	m.thumbDirPerms = os.FileMode(fm)
+}
+
+func New() *Manikyr {
+	// Sensible defaults
+	return &Manikyr{
+		roots:			make(map[string]*fsnotify.Watcher),
+		thumbWidth: 		100,
+		thumbHeight: 		100,
+		thumbAlgo:		NearestNeighbor,
+		thumbDirPerms:		0777,
+		ThumbDirGetter: func(parentFile string) string {
+			return path.Join(path.Dir(parentFile), ".thumbs")
+		},
+		ThumbNameGetter: func(parentFile string) string {
+			return path.Base(parentFile)
+		},
+		ShouldCreateThumb: func(root, parentFile string) bool {
+			if NthSubdir(root, parentFile, 1) {
+				return true
+			}
+			return false
+		},
+		ShouldWatchSubdir: func(root, parentFile string) bool {
+			if NthSubdir(root, parentFile, 0) && parentFile[0] != '.' {
+				return true
+			}
+			return false
+		},
 	}
 }
