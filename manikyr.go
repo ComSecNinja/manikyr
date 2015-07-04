@@ -186,13 +186,8 @@ func (m *Manikyr) removeThumb(parentFile string) error {
 	return os.Remove(thumbPath)
 }
 func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
-	img, err := imaging.Open(parentFile)
-	if err == image.ErrFormat {
-		// There is a chance that the file is not yet completely created.
-		// We need some sort of retry/wait functionality in here for production use.
-		errChan <-err
-		return
-	} else if err != nil {
+	img, err := openImageWhenReady(parentFile)
+	if err != nil {
 		errChan <-err
 		return
 	}
