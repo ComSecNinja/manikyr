@@ -13,6 +13,8 @@ import (
 var (
 	ErrRootNotExist 	= errors.New("root does not exist")
 	ErrRootExist 		= errors.New("root already exists")
+	ErrSubdirNotWatched	= errors.New("subdir is not watched")
+	ErrSubdirWatched	= errors.New("subdir is already watched")
 
 	NearestNeighbor		= imaging.NearestNeighbor
 	Box			= imaging.Box
@@ -33,6 +35,7 @@ var (
 
 type Manikyr struct {
 	roots			map[string]*fsnotify.Watcher
+	subdirs			map[string][]string
 	errChans		map[string]chan error
 	thumbDirPerms		os.FileMode
 	thumbWidth		int
@@ -79,6 +82,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 	m.roots[root].Close()
 	delete(m.roots, root)
 	delete(m.errChans, root)
+	delete(m.subdirs, root)
 	return nil
 }
 func (m *Manikyr) watch(root string, errChan chan error) {
@@ -128,6 +132,52 @@ func (m *Manikyr) watch(root string, errChan chan error) {
 			errChan <-err
 		}
 	}
+}
+func (m *Manikyr) AddSubdir(root, subdir string) error {
+	if _, ok := m.roots[root]; !ok {
+		return ErrRootNotExist
+	}
+	for i := range m.subdirs[root] {
+		if m.subdirs[root][i] == subdir {
+			return ErrSubdirWatched
+		}
+	}
+
+	err := m.roots[root].Add(subdir)
+	if err != nil {
+		return err
+	}
+	m.subdirs[root] = append(m.subdirs[root], subdir)
+	return nil
+}
+func (m *Manikyr) RemoveSubdir(root, subdir string) error {
+	if _, ok := m.roots[root]; !ok {
+		return ErrRootNotExist
+	}
+
+	for i := range m.subdirs[root] {
+		if m.subdirs[root][i] == subdir {
+			m.subdirs[root] = append(m.subdirs[root][:i], m.subdirs[root][i+1:]...) // Keep indexes <i || >i
+			err := m.roots[root].Remove(subdir)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+	return ErrSubdirNotWatched
+}
+func (m *Manikyr) Subdirs(root string) ([]string, error) {
+	subdirs := make([]string, len(m.subdirs[root]))
+	
+	if _, ok := m.roots[root]; !ok {
+		return subdirs, ErrRootNotExist
+	}
+	
+	for i := range m.subdirs[root] {
+		subdirs[i] = m.subdirs[root][i]
+	}
+	return subdirs, nil
 }
 func (m *Manikyr) removeThumb(parentFile string) error {
 	thumbPath := path.Join(m.ThumbDirGetter(parentFile), m.ThumbNameGetter(parentFile))
@@ -201,6 +251,7 @@ func New() *Manikyr {
 	// Sensible defaults
 	return &Manikyr{
 		roots:			make(map[string]*fsnotify.Watcher),
+		subdirs:		make(map[string][]string),
 		errChans:		make(map[string]chan error),
 		thumbWidth: 		100,
 		thumbHeight: 		100,
