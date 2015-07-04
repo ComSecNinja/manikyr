@@ -1,40 +1,66 @@
 # manikyr
-Automate batch thumbnailing in filesystems.  
+Specializes in thumbs.
+
+Automate image thumbnailing.  
 Any root directory currently watched should **not** be removed or renamed.
 
-Here's an ugly and **obsolete** graph of the functionality:
+## Installation
+`go get github.com/ComSecNinja/manikyr`
 
+## Usage
+The next example watches `/home/timo/picshur/` and any direct child directory (`/home/timo/picshur/*/`) for changes.  
+If a new image file is created (by e.g. copying) in one of the direct child directories, manikyr automatically creates a thumbnail to `/home/timo/picshur/*/thumb` with the same name as the original file.  
+If a file is deleted in a direct child directory and a file with the same name is present in the designated thumbnail directory, it gets deleted.  
+Deleting direct child directories automatically unwatches them so you do not need to worry about that.
 ```
-             Event has a type and a path ($NAME)                                                                     
-             ===================================                                                                     
-                                                                              +-----------------------------+        
- +------------------------+                                  +--------------> |Create thumbnail of ./{1}/{2}|        
- |      Watch $NAME       | <-------------------+ Yes        |                |to ./{1}/.thumbs/{2}         |        
- +------------------------+                        +         |                +-----------------------------+-------+
- |            +------------------------+           |         |                        ^                             |
- | +--------> |Is event of type CREATE?|           |  +------+--------+               +                             |
- | |          +------------+-----------+           |  | Mkdir         | <-+ No       Yes                            |
- | |          |            |                       |  | ./{1}/.thumbs |     +         +                             |
- | |          +            +                       |  +---------------+     |         |                             |
- | |         No           Yes        +-------------+---------------+     +--+---------+--------+                    |
- | |          +            +         |Is $NAME a directory and does|     |Is there a directory | <--+ Yes           |
- | |          |            +-------> |it match pattern ./{1}?      |     |./{1}/.thumbs?       |       +            |
- | |          |                      +---------------------------+-+     +---------------------+       |            |
- | | +--------v-----------+          +-----------------------+   |       +-----------------------------+---+        |
- | | |Does $NAME match    +-+ Yes +> |Does $NAME still exist?|   +       |Is $NAME a regular file and does |        |
- | | |pattern ./{1}/{2}?  |          +-----------+-------+---+   No +--> |it match pattern ./{1}/{2}?      |        |
- | | +--------------------+-+ No                 |       |               +-------------------+-------------+        |
- | |                          +                  +       +     +--------------------+        |                      |
- | | +-------------+          |                 Yes     No +-> | Is there a file    |        |                      |
- | +-|Get new event| <-------<+                  +             | ./{1}/.thumbs/{2}? |        |                      |
- |   +-------------+          |                  |             +------------------+-+        |                      |
- |        ^ ^  ^              +-----------------<+----+ No +---+                  |          +                      |
- |        | |  |                                                                  |         No                      |
- +--------+ |  |                                +--------------------+            +          +                      |
-            |  |                                | Remove             | <--------+ Yes        |                      |
-            |  +---------------------------<+---+ ./{1}/.thumbs/{2}  |                       |                      |
-            |                               |   +--------------------+                       |                      |
-  +---------+---------+                     |                                                |                      |
-  | Watch ./ and ./*  |  START HERE         +-----------------------------------------------<+----------------------+
-  +-------------------+                                                                                              
+package main
+
+import (
+	"path"
+	"github.com/ComSecNinja/manikyr"
+)
+
+const myRoot = "/home/timo/picshur-test"
+
+func main() {
+	// Create a new manikyr.Manikyr instance
+	mk := manikyr.New()
+
+	// Thumbnail directory is {root}/{gallery}/thumbs
+	mk.ThumbDirGetter = func(p string) string {
+		return path.Join(path.Dir(p), "thumbs")
+	}
+
+	// Create chan to receive and print errors
+	rootErrChan := make(chan error)
+
+	// Add our root directory which holds the gallery directories
+	err := mk.AddRoot(myRoot, rootErrChan)
+	if err != nil {
+		panic(err)
+	}
+
+	// Watch every visible subdirectory in our root
+	subdirs, err := manikyr.Subdirectories(myRoot)
+	if err != nil {
+		panic(err)
+	}
+	for _, sd := range subdirs {
+		if path.Base(sd)[0] != '.' { // Exclude hidden directories
+			err := mk.AddSubdir(myRoot, sd)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	println("Manikyr ready)
+	for {
+		for {
+			if err := <-rootErrChan; err != nil {
+				println(err.Error())
+			}
+		}
+	}
+}
 ```
