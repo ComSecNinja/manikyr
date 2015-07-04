@@ -133,7 +133,7 @@ func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 			}
 		case err := <- w.Errors:
 			errChan <-err
-		case _ <- doneChan:
+		case <- doneChan:
 			break
 		}
 	}
