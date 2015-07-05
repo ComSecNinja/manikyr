@@ -5,47 +5,48 @@ import (
 	"os"
 	"path"
 
-	"github.com/go-fsnotify/fsnotify"
 	"github.com/disintegration/imaging"
+	"github.com/go-fsnotify/fsnotify"
 )
 
 var (
-	ErrRootNotWatched 	= errors.New("root is not watched")
-	ErrRootWatched 		= errors.New("root is already watched")
-	ErrSubdirNotWatched	= errors.New("subdir is not watched")
-	ErrSubdirWatched	= errors.New("subdir is already watched")
+	ErrRootNotWatched   = errors.New("root is not watched")
+	ErrRootWatched      = errors.New("root is already watched")
+	ErrSubdirNotWatched = errors.New("subdir is not watched")
+	ErrSubdirWatched    = errors.New("subdir is already watched")
 
-	NearestNeighbor		= imaging.NearestNeighbor
-	Box			= imaging.Box
-	Linear			= imaging.Linear
-	Hermite			= imaging.Hermite
-	MitchellNetravali	= imaging.MitchellNetravali
-	CatmullRom		= imaging.CatmullRom
-	BSpline			= imaging.BSpline
-	Gaussian		= imaging.Gaussian
-	Bartlett		= imaging.Bartlett
-	Lanczos			= imaging.Lanczos
-	Hann			= imaging.Hann
-	Hamming			= imaging.Hamming
-	Blackman		= imaging.Blackman
-	Welch			= imaging.Welch
-	Cosine			= imaging.Cosine
+	NearestNeighbor   = imaging.NearestNeighbor
+	Box               = imaging.Box
+	Linear            = imaging.Linear
+	Hermite           = imaging.Hermite
+	MitchellNetravali = imaging.MitchellNetravali
+	CatmullRom        = imaging.CatmullRom
+	BSpline           = imaging.BSpline
+	Gaussian          = imaging.Gaussian
+	Bartlett          = imaging.Bartlett
+	Lanczos           = imaging.Lanczos
+	Hann              = imaging.Hann
+	Hamming           = imaging.Hamming
+	Blackman          = imaging.Blackman
+	Welch             = imaging.Welch
+	Cosine            = imaging.Cosine
 )
 
 type Manikyr struct {
-	roots			map[string]*fsnotify.Watcher
-	subdirs			map[string][]string
-	errChans		map[string]chan error
-	doneChans		map[string]chan bool
-	thumbDirPerms		os.FileMode
-	thumbWidth		int
-	thumbHeight		int
-	thumbAlgo		imaging.ResampleFilter
-	ThumbDirGetter		func(string) string
-	ThumbNameGetter		func(string) string
-	ShouldCreateThumb	func(string, string) bool
-	ShouldWatchSubdir	func(string, string) bool
+	roots             map[string]*fsnotify.Watcher
+	subdirs           map[string][]string
+	errChans          map[string]chan error
+	doneChans         map[string]chan bool
+	thumbDirPerms     os.FileMode
+	thumbWidth        int
+	thumbHeight       int
+	thumbAlgo         imaging.ResampleFilter
+	ThumbDirGetter    func(string) string
+	ThumbNameGetter   func(string) string
+	ShouldCreateThumb func(string, string) bool
+	ShouldWatchSubdir func(string, string) bool
 }
+
 func (m *Manikyr) Roots() []string {
 	keys := make([]string, len(m.roots))
 	i := 0
@@ -64,7 +65,7 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 	if err != nil {
 		return err
 	}
-	
+
 	doneChan := make(chan bool)
 
 	m.roots[root] = w
@@ -79,7 +80,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 		return ErrRootNotWatched
 	}
 	m.roots[root].Close()
-	m.doneChans[root] <-true
+	m.doneChans[root] <- true
 
 	delete(m.roots, root)
 	delete(m.errChans, root)
@@ -90,21 +91,21 @@ func (m *Manikyr) RemoveRoot(root string) error {
 func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 	w, ok := m.roots[root]
 	if !ok {
-		errChan <-ErrRootNotWatched
+		errChan <- ErrRootNotWatched
 		return
 	}
 
 	defer w.Close()
 	for {
 		select {
-		case evt := <- w.Events:
+		case evt := <-w.Events:
 			if evt.Op == fsnotify.Create {
 				// If a file was created
 
 				// Get some info about the file
 				info, err := os.Stat(evt.Name)
 				if os.IsNotExist(err) {
-					errChan <-err
+					errChan <- err
 					continue
 				}
 
@@ -127,13 +128,13 @@ func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 					// have been a directory or a non-image file.
 					m.removeThumb(evt.Name)
 				} else if err != nil {
-					errChan <-err
+					errChan <- err
 					continue
 				}
 			}
-		case err := <- w.Errors:
-			errChan <-err
-		case <- doneChan:
+		case err := <-w.Errors:
+			errChan <- err
+		case <-doneChan:
 			break
 		}
 	}
@@ -175,7 +176,7 @@ func (m *Manikyr) removeThumb(parentFile string) error {
 func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 	img, err := openImageWhenReady(parentFile)
 	if err != nil {
-		errChan <-err
+		errChan <- err
 		return
 	}
 
@@ -186,11 +187,11 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 		// ..create it
 		err := os.Mkdir(localThumbs, m.thumbDirPerms)
 		if err != nil {
-			errChan <-err
+			errChan <- err
 			return
 		}
 	} else if err != nil {
-		errChan <-err
+		errChan <- err
 		return
 	}
 
@@ -198,7 +199,7 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 	thumb := imaging.Thumbnail(img, m.thumbWidth, m.thumbHeight, m.thumbAlgo)
 	thumbPath := path.Join(localThumbs, m.ThumbNameGetter(parentFile))
 	if err = imaging.Save(thumb, thumbPath); err != nil {
-		errChan <-err
+		errChan <- err
 	}
 }
 func (m *Manikyr) ThumbSize() (int, int) {
@@ -239,14 +240,14 @@ func (m *Manikyr) Init(root string) error {
 func New() *Manikyr {
 	// Sensible defaults
 	return &Manikyr{
-		roots:			make(map[string]*fsnotify.Watcher),
-		subdirs:		make(map[string][]string),
-		errChans:		make(map[string]chan error),
-		doneChans:		make(map[string]chan bool),
-		thumbWidth: 		128,
-		thumbHeight: 		128,
-		thumbAlgo:		NearestNeighbor,
-		thumbDirPerms:		0777,
+		roots:         make(map[string]*fsnotify.Watcher),
+		subdirs:       make(map[string][]string),
+		errChans:      make(map[string]chan error),
+		doneChans:     make(map[string]chan bool),
+		thumbWidth:    128,
+		thumbHeight:   128,
+		thumbAlgo:     NearestNeighbor,
+		thumbDirPerms: 0777,
 		ThumbDirGetter: func(parentFile string) string {
 			return os.TempDir()
 		},
