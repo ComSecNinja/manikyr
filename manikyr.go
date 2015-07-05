@@ -1,9 +1,12 @@
+// Package manikyr provides a sensible and filesystem 
+// structure agnostic image thumbnailing automation.
 package manikyr
 
 import (
 	"errors"
 	"os"
 	"path"
+	"runtime"
 
 	"github.com/disintegration/imaging"
 	"github.com/go-fsnotify/fsnotify"
@@ -32,6 +35,11 @@ var (
 	Cosine            = imaging.Cosine
 )
 
+// Manikyr watches specified directory roots for changes.
+// If a new file matching the rules the user has set is created,
+// it will get watched (directory), or thumbnailed (regular file)
+// to a dynamic location with the chosen dimensions and algorithm.
+// Subdirectory unwatching on deletion is automatic.
 type Manikyr struct {
 	roots             map[string]*fsnotify.Watcher
 	subdirs           map[string][]string
@@ -47,6 +55,12 @@ type Manikyr struct {
 	ShouldWatchSubdir func(string, string) bool
 }
 
+func init() {
+	// Utilize all CPU cores for performance
+	runtime.GOMAXPROCS(runtime.NumCPU())
+}
+
+// Root returns a list of currently watched root directory paths.
 func (m *Manikyr) Roots() []string {
 	keys := make([]string, len(m.roots))
 	i := 0
@@ -56,6 +70,9 @@ func (m *Manikyr) Roots() []string {
 	}
 	return keys
 }
+
+// AddRoot adds and watches specified path as a new root, piping future errors to given channel.
+// The error returned considers the watcher creation, not function.
 func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 	if _, ok := m.roots[root]; ok {
 		return ErrRootWatched
@@ -75,6 +92,12 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 
 	return m.roots[root].Add(root)
 }
+
+// RemoveRoot removes the named root directory path and unwatches it. 
+// A root should always be unwatched this way prior to actual
+// path deletion in the filesystem.
+// If the named path was not previously specified to be a root,
+// a non-nil error is returned.
 func (m *Manikyr) RemoveRoot(root string) error {
 	if _, ok := m.roots[root]; !ok {
 		return ErrRootNotWatched
@@ -88,6 +111,7 @@ func (m *Manikyr) RemoveRoot(root string) error {
 	delete(m.subdirs, root)
 	return nil
 }
+
 func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 	w, ok := m.roots[root]
 	if !ok {
@@ -139,6 +163,9 @@ func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 		}
 	}
 }
+
+// AddSubdir adds a subdirectory to a root watcher. 
+// Both paths should be absolute.
 func (m *Manikyr) AddSubdir(root, subdir string) error {
 	if _, ok := m.roots[root]; !ok {
 		return ErrRootNotWatched
@@ -156,6 +183,9 @@ func (m *Manikyr) AddSubdir(root, subdir string) error {
 	m.subdirs[root] = append(m.subdirs[root], subdir)
 	return nil
 }
+
+// RemoveSubdir removes a subdirectory from a root watcher.
+// Both paths should be absolute.
 func (m *Manikyr) RemoveSubdir(root, subdir string) error {
 	if _, ok := m.roots[root]; !ok {
 		return ErrRootNotWatched
@@ -169,10 +199,12 @@ func (m *Manikyr) RemoveSubdir(root, subdir string) error {
 	}
 	return ErrSubdirNotWatched
 }
+
 func (m *Manikyr) removeThumb(parentFile string) error {
 	thumbPath := path.Join(m.ThumbDirGetter(parentFile), m.ThumbNameGetter(parentFile))
 	return os.Remove(thumbPath)
 }
+
 func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 	img, err := openImageWhenReady(parentFile)
 	if err != nil {
@@ -202,12 +234,15 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 		errChan <- err
 	}
 }
+
+// Get the currently set thumbnail dimensions
 func (m *Manikyr) ThumbSize() (int, int) {
 	return m.thumbWidth, m.thumbHeight
 }
-func (m *Manikyr) SetThumbSize(w, h int) {
-	// Dimensions must be positive
 
+// Set thumbnail dimensions. 
+// Dimensions should be positive.
+func (m *Manikyr) SetThumbSize(w, h int) {
 	if w < 1 {
 		w = 1
 	}
@@ -218,18 +253,32 @@ func (m *Manikyr) SetThumbSize(w, h int) {
 	}
 	m.thumbHeight = h
 }
-func (m *Manikyr) ThumbDirFileMode() uint32 {
-	return uint32(m.thumbDirPerms)
+
+// ThumbDirFileMode gets the currently set filemode for thumbnail directories.
+func (m *Manikyr) ThumbDirFileMode() os.FileMode {
+	return m.thumbDirPerms
 }
+
+// SetThumbDirFileMode sets the filemode for thumbnail directories.
 func (m *Manikyr) SetThumbDirFileMode(fm uint32) {
 	m.thumbDirPerms = os.FileMode(fm)
 }
+
+// ThumbAlgorithm gets the currently used algorithm for thumbnail creation.
 func (m *Manikyr) ThumbAlgorithm() imaging.ResampleFilter {
 	return m.thumbAlgo
 }
+
+// SetThumbAlgorithm sets the used algorithm for thumbnail creation.
+// See godoc.org/github.com/disintegration/imaging#ResampleFilter for more info.
 func (m *Manikyr) SetThumbAlgorithm(filter imaging.ResampleFilter) {
 	m.thumbAlgo = filter
 }
+
+// Init watches and thumbnail existing files as if they
+// were added after the root directory got watched.
+// Regular files are checked for corresponding thumbnails
+// before creating a new one. 
 func (m *Manikyr) Init(root string) error {
 	if _, ok := m.roots[root]; !ok {
 		return ErrRootNotWatched
@@ -237,8 +286,12 @@ func (m *Manikyr) Init(root string) error {
 	return autoAdd(m, root, root)
 }
 
+// New creates a new Manikyr instance which holds a set of
+// preferences and directory roots to apply those rules to.
+// Default values should be kept safe, as in not doing
+// any damage to the filesystem integrity if the instance is
+// initialized as is. 
 func New() *Manikyr {
-	// Sensible defaults
 	return &Manikyr{
 		roots:         make(map[string]*fsnotify.Watcher),
 		subdirs:       make(map[string][]string),
