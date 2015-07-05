@@ -21,40 +21,52 @@ import (
 const myRoot = "/home/timo/picshur-test"
 
 func main() {
+	var err error
+
+	// Create a new manikyr.Manikyr instance
 	mk := manikyr.New()
 
-	// Thumbnail directory is {root}/{gallery}/thumbs
+	// Thumbnail directory is $myRoot/../{parentDir}/thumbs
 	mk.ThumbDirGetter = func(p string) string {
 		return path.Join(path.Dir(p), "thumbs")
 	}
 
-	// Create chan to receive errors
+	// When we bump into a subdir, should we watch it?
+	mk.ShouldWatchSubdir = func(root, subdir string) bool {
+		ok, _ := manikyr.NthSubdir(root, subdir, 0)
+		if ok && subdir[0] != '.' && subdir != mk.ThumbDirGetter(subdir) {
+			return true
+		}
+		return false
+	}
+
+	// When we bump into a file, should we try to thumbnail it?
+	mk.ShouldCreateThumb = func(root, file string) bool {
+		ok, _ := manikyr.NthSubdir(root, file, 1)
+		return ok
+	}
+
+	// Create chan to receive and print errors
 	rootErrChan := make(chan error)
 
 	// Add our root directory which holds the gallery directories
-	err := mk.AddRoot(myRoot, rootErrChan)
+	err = mk.AddRoot(myRoot, rootErrChan)
 	if err != nil {
 		panic(err)
 	}
 
-	// Watch every visible subdirectory in our root
-	subdirs, err := manikyr.Subdirectories(myRoot)
+	// Watch and thumbnail existing files like they were added after the program started
+	err = mk.Init(myRoot)
 	if err != nil {
 		panic(err)
 	}
-	for _, sd := range subdirs {
-		if path.Base(sd)[0] != '.' { // Exclude hidden directories
-			err := mk.AddSubdir(myRoot, sd)
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
 
-	println("Manikyr ready)
+	println("Manikyr ready")
 	for {
-		if err := <-rootErrChan; err != nil {
-			println(err.Error())
+		for {
+			if err := <-rootErrChan; err != nil {
+				println(err.Error())
+			}
 		}
 	}
 }
