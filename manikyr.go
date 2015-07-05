@@ -270,7 +270,7 @@ func (m *Manikyr) ThumbAlgorithm() imaging.ResampleFilter {
 }
 
 // SetThumbAlgorithm sets the used algorithm for thumbnail creation.
-// See godoc.org/github.com/disintegration/imaging#ResampleFilter for more info.
+// See http://godoc.org/github.com/disintegration/imaging#ResampleFilter for more info.
 func (m *Manikyr) SetThumbAlgorithm(filter imaging.ResampleFilter) {
 	m.thumbAlgo = filter
 }
