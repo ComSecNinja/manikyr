@@ -38,6 +38,8 @@ func openImageWhenReady(file string) (image.Image, error) {
 	return img, err
 }
 
+// Subdirectories returns a list of absolute paths of subdirectories in a given directory.
+// Returned error is non-nil if the directory provided could not be read.
 func Subdirectories(root string) ([]string, error) {
 	var dirs []string
 
@@ -54,6 +56,8 @@ func Subdirectories(root string) ([]string, error) {
 	return dirs, nil
 }
 
+// NthSubdir returns true if dir is the nth-level subdirectory of root, else false.
+// This function should never return a non-nil error, preserved for testing for now.
 func NthSubdir(root, dir string, n int) (bool, error) {
 	return path.Match(path.Join(root, "*" + strings.Repeat("/*", n)), dir)
 }
