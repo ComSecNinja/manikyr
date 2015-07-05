@@ -2,7 +2,6 @@ package manikyr
 
 import (
 	"errors"
-	"io/ioutil"
 	"os"
 	"path"
 
