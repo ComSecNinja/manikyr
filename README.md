@@ -22,8 +22,6 @@ const myRoot = "/home/timo/picshur-test"
 
 func main() {
 	var err error
-
-	// Create a new manikyr.Manikyr instance
 	mk := manikyr.New()
 
 	// Thumbnail directory is $myRoot/../{parentDir}/thumbs
@@ -55,7 +53,8 @@ func main() {
 		panic(err)
 	}
 
-	// Watch and thumbnail existing files like they were added after the program started
+	// Watch and thumbnail existing files like they were 
+	// added after the program started
 	err = mk.Init(myRoot)
 	if err != nil {
 		panic(err)
@@ -63,10 +62,8 @@ func main() {
 
 	println("Manikyr ready")
 	for {
-		for {
-			if err := <-rootErrChan; err != nil {
-				println(err.Error())
-			}
+		if err := <-rootErrChan; err != nil {
+			println(err.Error())
 		}
 	}
 }
