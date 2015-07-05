@@ -2,6 +2,7 @@ package manikyr
 
 import (
 	"errors"
+	"io/ioutil"
 	"os"
 	"path"
 
@@ -168,18 +169,6 @@ func (m *Manikyr) RemoveSubdir(root, subdir string) error {
 	}
 	return ErrSubdirNotWatched
 }
-func (m *Manikyr) Subdirs(root string) ([]string, error) {
-	subdirs := make([]string, len(m.subdirs[root]))
-	
-	if _, ok := m.roots[root]; !ok {
-		return subdirs, ErrRootNotWatched
-	}
-	
-	for i := range m.subdirs[root] {
-		subdirs[i] = m.subdirs[root][i]
-	}
-	return subdirs, nil
-}
 func (m *Manikyr) removeThumb(parentFile string) error {
 	thumbPath := path.Join(m.ThumbDirGetter(parentFile), m.ThumbNameGetter(parentFile))
 	return os.Remove(thumbPath)
@@ -240,6 +229,12 @@ func (m *Manikyr) ThumbAlgorithm() imaging.ResampleFilter {
 }
 func (m *Manikyr) SetThumbAlgorithm(filter imaging.ResampleFilter) {
 	m.thumbAlgo = filter
+}
+func (m *Manikyr) Init(root string) error {
+	if _, ok := m.roots[root]; !ok {
+		return ErrRootNotWatched
+	}
+	return autoAdd(m, root, root)
 }
 
 func New() *Manikyr {
