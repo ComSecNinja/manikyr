@@ -74,7 +74,7 @@ func autoAdd(m *Manikyr, root, currentDir string) error {
 			if err != nil {
 				return err
 			}
-		} else if file.IsRegular() && m.ShouldCreateThumb(root, filePath) {
+		} else if !file.IsDir() && m.ShouldCreateThumb(root, filePath) {
 			thumbLocation := path.Join(m.ThumbDirGetter(filePath), m.ThumbNameGetter(filePath))
 			if _, err := os.Stat(thumbLocation); os.IsNotExist(err) {
 				go m.createThumb(filePath, m.errChans[root])
@@ -83,4 +83,5 @@ func autoAdd(m *Manikyr, root, currentDir string) error {
 			}
 		}
 	}
+	return nil
 }
