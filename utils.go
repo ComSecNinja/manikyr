@@ -3,6 +3,7 @@ package manikyr
 import (
 	"image"
 	"io/ioutil"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -55,4 +56,31 @@ func Subdirectories(root string) ([]string, error) {
 
 func NthSubdir(root, dir string, n int) (bool, error) {
 	return path.Match(path.Join(root, "*" + strings.Repeat("/*", n)), dir)
+}
+
+func autoAdd(m *Manikyr, root, currentDir string) error {
+	files, err := ioutil.ReadDir(currentDir)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		filePath := path.Join(root, file.Name())
+		if file.IsDir() && m.ShouldWatchSubdir(root, filePath) {
+			err = m.AddSubdir(root, filePath)
+			if err != nil {
+				return err
+			}
+			err = autoAdd(m, root, filePath)
+			if err != nil {
+				return err
+			}
+		} else if file.IsRegular() && m.ShouldCreateThumb(root, filePath) {
+			thumbLocation := path.Join(m.ThumbDirGetter(filePath), m.ThumbNameGetter(filePath))
+			if _, err := os.Stat(thumbLocation); os.IsNotExist(err) {
+				go m.createThumb(filePath, m.errChans[root])
+			} else if err != nil {
+				return err	
+			}
+		}
+	}
 }
