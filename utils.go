@@ -65,7 +65,7 @@ func autoAdd(m *Manikyr, root, currentDir string) error {
 	}
 	for _, file := range files {
 		filePath := path.Join(root, file.Name())
-		if file.IsDir() && m.ShouldWatchSubdir(root, filePath) {
+		if file.IsDir() && m.ShouldWatchSubdir(currentDir, filePath) {
 			err = m.AddSubdir(root, filePath)
 			if err != nil {
 				return err
