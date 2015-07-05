@@ -254,14 +254,9 @@ func New() *Manikyr {
 			return path.Base(parentFile)
 		},
 		ShouldCreateThumb: func(root, parentFile string) bool {
-			ok, _ := NthSubdir(root, parentFile, 1)
-			return ok
+			return false
 		},
-		ShouldWatchSubdir: func(root, parentFile string) bool {
-			ok, _ := NthSubdir(root, parentFile, 0)
-			if ok && parentFile[0] != '.' {
-				return true
-			}
+		ShouldWatchSubdir: func(root, subdir string) bool {
 			return false
 		},
 	}
