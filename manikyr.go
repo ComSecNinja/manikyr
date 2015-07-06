@@ -4,6 +4,7 @@ package manikyr
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"runtime"
@@ -15,8 +16,6 @@ import (
 var (
 	ErrRootNotWatched   = errors.New("root is not watched")
 	ErrRootWatched      = errors.New("root is already watched")
-	ErrSubdirNotWatched = errors.New("subdir is not watched")
-	ErrSubdirWatched    = errors.New("subdir is already watched")
 
 	NearestNeighbor   = imaging.NearestNeighbor
 	Box               = imaging.Box
@@ -35,16 +34,59 @@ var (
 	Cosine            = imaging.Cosine
 )
 
+type EventType uint32
+const (
+	Error EventType = 1 << iota
+	ThumbCreate
+	ThumbRemove
+	Watch
+)
+func (t EventType) String() string {
+	switch t {
+		case Error:
+			return "Error"
+		case ThumbCreate:
+			return "ThumbCreate"
+		case ThumbRemove:
+			return "ThumbRemove"
+		case Watch:
+			return "Watch"
+		default:
+			return "Unknown"
+	}
+}
+
+// Event represents a single event 
+// considering watching and thumbnailing files
+type Event struct {
+	Root  string
+	Path  string
+	Type  EventType
+	Error error
+}
+
+// String returns a string representation of the event
+func (e Event) String() string {
+	if e.Type == Error {
+		return fmt.Sprintf("%s: %s @ %s \\%s", e.Type.String(), e.Error.Error(), e.Path, e.Root)
+	}
+	return fmt.Sprintf("%s: %s \\%s", e.Type.String(), e.Path, e.Root)
+}
+
+type rootWatcher struct {
+	path    string
+	watcher *fsnotify.Watcher
+	events	chan Event
+	done    chan struct{}
+}
+
 // Manikyr watches specified directory roots for changes.
 // If a new file matching the rules the user has set is created,
 // it will get watched (directory), or thumbnailed (regular file)
 // to a dynamic location with the chosen dimensions and algorithm.
 // Subdirectory unwatching on deletion is automatic.
 type Manikyr struct {
-	roots             map[string]*fsnotify.Watcher
-	subdirs           map[string][]string
-	errChans          map[string]chan error
-	doneChans         map[string]chan bool
+	roots             []*rootWatcher
 	thumbDirPerms     os.FileMode
 	thumbWidth        int
 	thumbHeight       int
@@ -60,21 +102,42 @@ func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
+func (m *Manikyr) EmitEvent(root string, t EventType, path string, err error) {
+	for _, rw := range m.roots {
+		if rw.path == root {
+			rw.events <-Event{
+				Root: rw.path,
+				Type: t,
+				Path: path,
+				Error: err,
+			}
+			return
+		}
+	}
+}
+
 // Root returns a list of currently watched root directory paths.
 func (m *Manikyr) Roots() []string {
-	keys := make([]string, len(m.roots))
-	i := 0
-	for k := range m.roots {
-		keys[i] = k
-		i = i + 1
+	roots := make([]string, len(m.roots))
+	for i, rw := range m.roots {
+		roots[i] = rw.path
 	}
-	return keys
+	return roots
+}
+
+func (m *Manikyr) HasRoot(root string) bool {
+	for _, rw := range m.roots {
+		if rw.path == root {
+			return true
+		}
+	}
+	return false
 }
 
 // AddRoot adds and watches specified path as a new root, piping future errors to given channel.
 // The error returned considers the watcher creation, not function.
-func (m *Manikyr) AddRoot(root string, errChan chan error) error {
-	if _, ok := m.roots[root]; ok {
+func (m *Manikyr) AddRoot(root string, evtChan chan Event) error {
+	if m.HasRoot(root) {
 		return ErrRootWatched
 	}
 
@@ -83,14 +146,19 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 		return err
 	}
 
-	doneChan := make(chan bool)
+	doneChan := make(chan struct{})
 
-	m.roots[root] = w
-	m.errChans[root] = errChan
-	m.doneChans[root] = doneChan
-	go m.watch(root, errChan, doneChan)
+	rw := rootWatcher{
+		path: root,
+		events: evtChan,
+		done: doneChan,
+		watcher: w,
+	}
 
-	return m.roots[root].Add(root)
+	m.roots = append(m.roots, &rw)
+	go m.watch(&rw)
+
+	return rw.watcher.Add(root)
 }
 
 // RemoveRoot removes the named root directory path and unwatches it. 
@@ -99,48 +167,45 @@ func (m *Manikyr) AddRoot(root string, errChan chan error) error {
 // If the named path was not previously specified to be a root,
 // a non-nil error is returned.
 func (m *Manikyr) RemoveRoot(root string) error {
-	if _, ok := m.roots[root]; !ok {
+	if !m.HasRoot(root) {
 		return ErrRootNotWatched
 	}
-	m.roots[root].Close()
-	m.doneChans[root] <- true
 
-	delete(m.roots, root)
-	delete(m.errChans, root)
-	delete(m.doneChans, root)
-	delete(m.subdirs, root)
+	for i, rw := range m.roots {
+		if rw.path == root {
+			rw.watcher.Close()
+			rw.done <- struct{}{}
+			m.roots = append(m.roots[:i], m.roots[i+1:]...)
+			break
+		}
+	}
+
 	return nil
 }
 
-func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
-	w, ok := m.roots[root]
-	if !ok {
-		errChan <- ErrRootNotWatched
-		return
-	}
-
-	defer w.Close()
+func (m *Manikyr) watch(rw *rootWatcher) {
+	defer rw.watcher.Close()
 	for {
 		select {
-		case evt := <-w.Events:
+		case evt := <-rw.watcher.Events:
 			if evt.Op == fsnotify.Create {
 				// If a file was created
 
 				// Get some info about the file
 				info, err := os.Stat(evt.Name)
 				if os.IsNotExist(err) {
-					errChan <- err
+					m.EmitEvent(rw.path, Error, evt.Name, err)
 					continue
 				}
 
 				switch mode := info.Mode(); {
 				case mode.IsDir():
-					if m.ShouldWatchSubdir(root, evt.Name) {
-						w.Add(evt.Name)
+					if m.ShouldWatchSubdir(rw.path, evt.Name) {
+						rw.watcher.Add(evt.Name)
 					}
 				case mode.IsRegular():
-					if m.ShouldCreateThumb(root, evt.Name) {
-						go m.createThumb(evt.Name, errChan)
+					if m.ShouldCreateThumb(rw.path, evt.Name) {
+						go m.createThumb(rw.path, evt.Name)
 					}
 				}
 			} else {
@@ -148,17 +213,16 @@ func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 				_, err := os.Stat(evt.Name)
 				if os.IsNotExist(err) {
 					// Try to delete thumb.
-					// Error is useless here because the file could
-					// have been a directory or a non-image file.
-					m.removeThumb(evt.Name)
+					m.removeThumb(rw.path, evt.Name)
+					continue
 				} else if err != nil {
-					errChan <- err
+					m.EmitEvent(rw.path, Error, evt.Name, err)
 					continue
 				}
 			}
-		case err := <-w.Errors:
-			errChan <- err
-		case <-doneChan:
+		case err := <-rw.watcher.Errors:
+			m.EmitEvent(rw.path, Error, "", err)
+		case <-rw.done:
 			break
 		}
 	}
@@ -166,49 +230,52 @@ func (m *Manikyr) watch(root string, errChan chan error, doneChan chan bool) {
 
 // AddSubdir adds a subdirectory to a root watcher. 
 // Both paths should be absolute.
-func (m *Manikyr) AddSubdir(root, subdir string) error {
-	if _, ok := m.roots[root]; !ok {
-		return ErrRootNotWatched
-	}
-	for i := range m.subdirs[root] {
-		if m.subdirs[root][i] == subdir {
-			return ErrSubdirWatched
+func (m *Manikyr) AddSubdir(root, subdir string) {
+	for _, rw := range m.roots {
+		if rw.path == root {
+			err := rw.watcher.Add(subdir)
+			if err != nil {
+				m.EmitEvent(root, Error, subdir, err)
+				return
+			}
+			m.EmitEvent(root, Watch, subdir, nil)
+			return
 		}
 	}
 
-	err := m.roots[root].Add(subdir)
-	if err != nil {
-		return err
-	}
-	m.subdirs[root] = append(m.subdirs[root], subdir)
-	return nil
+	m.EmitEvent(root, Error, subdir, ErrRootNotWatched)
 }
 
 // RemoveSubdir removes a subdirectory from a root watcher.
 // Both paths should be absolute.
 func (m *Manikyr) RemoveSubdir(root, subdir string) error {
-	if _, ok := m.roots[root]; !ok {
-		return ErrRootNotWatched
-	}
-
-	for i := range m.subdirs[root] {
-		if m.subdirs[root][i] == subdir {
-			m.subdirs[root] = append(m.subdirs[root][:i], m.subdirs[root][i+1:]...) // Keep indexes <i || >i
-			return m.roots[root].Remove(subdir)
+	for _, rw := range m.roots {
+		if rw.path == root {
+			return rw.watcher.Remove(subdir)
 		}
 	}
-	return ErrSubdirNotWatched
+
+	return ErrRootNotWatched
 }
 
-func (m *Manikyr) removeThumb(parentFile string) error {
+func (m *Manikyr) removeThumb(root, parentFile string) {
 	thumbPath := path.Join(m.ThumbDirGetter(parentFile), m.ThumbNameGetter(parentFile))
-	return os.Remove(thumbPath)
+	err := os.Remove(thumbPath)
+
+	if os.IsNotExist(err) {
+		return
+	} else if err != nil {
+		m.EmitEvent(root, Error, thumbPath, err)
+		return
+	}
+
+	m.EmitEvent(root, ThumbRemove, thumbPath, nil)
 }
 
-func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
+func (m *Manikyr) createThumb(root, parentFile string) {
 	img, err := openImageWhenReady(parentFile)
 	if err != nil {
-		errChan <- err
+		m.EmitEvent(root, Error, parentFile, err)
 		return
 	}
 
@@ -219,11 +286,11 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 		// ..create it
 		err := os.Mkdir(localThumbs, m.thumbDirPerms)
 		if err != nil {
-			errChan <- err
+			m.EmitEvent(root, Error, localThumbs, err)
 			return
 		}
 	} else if err != nil {
-		errChan <- err
+		m.EmitEvent(root, Error, localThumbs, err)
 		return
 	}
 
@@ -231,8 +298,11 @@ func (m *Manikyr) createThumb(parentFile string, errChan chan error) {
 	thumb := imaging.Thumbnail(img, m.thumbWidth, m.thumbHeight, m.thumbAlgo)
 	thumbPath := path.Join(localThumbs, m.ThumbNameGetter(parentFile))
 	if err = imaging.Save(thumb, thumbPath); err != nil {
-		errChan <- err
+		m.EmitEvent(root, Error, thumbPath, err)
+		return
 	}
+
+	m.EmitEvent(root, ThumbCreate, thumbPath, nil)
 }
 
 // Get the currently set thumbnail dimensions
@@ -280,10 +350,11 @@ func (m *Manikyr) SetThumbAlgorithm(filter imaging.ResampleFilter) {
 // Regular files are checked for corresponding thumbnails
 // before creating a new one. 
 func (m *Manikyr) Init(root string) error {
-	if _, ok := m.roots[root]; !ok {
+	if !m.HasRoot(root) {
 		return ErrRootNotWatched
 	}
-	return autoAdd(m, root, root)
+	autoAdd(m, root, root)
+	return nil
 }
 
 // New creates a new Manikyr instance which holds a set of
@@ -293,10 +364,7 @@ func (m *Manikyr) Init(root string) error {
 // initialized as is. 
 func New() *Manikyr {
 	return &Manikyr{
-		roots:         make(map[string]*fsnotify.Watcher),
-		subdirs:       make(map[string][]string),
-		errChans:      make(map[string]chan error),
-		doneChans:     make(map[string]chan bool),
+		roots:         []*rootWatcher{},
 		thumbWidth:    128,
 		thumbHeight:   128,
 		thumbAlgo:     NearestNeighbor,
@@ -315,3 +383,4 @@ func New() *Manikyr {
 		},
 	}
 }
+

@@ -38,8 +38,6 @@ func openImageWhenReady(file string) (image.Image, error) {
 	return img, err
 }
 
-// Subdirectories returns a list of absolute paths of subdirectories in a given directory.
-// Returned error is non-nil if the directory provided could not be read.
 func Subdirectories(root string) ([]string, error) {
 	var dirs []string
 
@@ -56,36 +54,31 @@ func Subdirectories(root string) ([]string, error) {
 	return dirs, nil
 }
 
-// NthSubdir returns true if dir is the nth-level subdirectory of root, else false.
-// This function should never return a non-nil error, preserved for testing for now.
 func NthSubdir(root, dir string, n int) (bool, error) {
 	return path.Match(path.Join(root, "*" + strings.Repeat("/*", n)), dir)
 }
 
-func autoAdd(m *Manikyr, root, currentDir string) error {
+func autoAdd(m *Manikyr, root, currentDir string) {
 	files, err := ioutil.ReadDir(currentDir)
 	if err != nil {
-		return err
+		m.EmitEvent(root, Error, currentDir, err)
+		return
 	}
+
 	for _, file := range files {
 		filePath := path.Join(root, file.Name())
 		if file.IsDir() && m.ShouldWatchSubdir(currentDir, filePath) {
-			err = m.AddSubdir(root, filePath)
-			if err != nil {
-				return err
-			}
-			err = autoAdd(m, root, filePath)
-			if err != nil {
-				return err
-			}
+			m.AddSubdir(root, filePath)
+			autoAdd(m, root, filePath)
 		} else if !file.IsDir() && m.ShouldCreateThumb(root, filePath) {
+			println(2)
 			thumbLocation := path.Join(m.ThumbDirGetter(filePath), m.ThumbNameGetter(filePath))
 			if _, err := os.Stat(thumbLocation); os.IsNotExist(err) {
-				go m.createThumb(filePath, m.errChans[root])
+				go m.createThumb(root, filePath)
 			} else if err != nil {
-				return err	
+				m.EmitEvent(root, Error, filePath, err)
+				continue
 			}
 		}
 	}
-	return nil
 }
