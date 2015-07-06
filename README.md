@@ -17,6 +17,7 @@ package main
 
 import (
 	"path"
+
 	"github.com/ComSecNinja/manikyr"
 )
 
@@ -40,17 +41,23 @@ func main() {
 		return false
 	}
 
-	// When we bump into a file, should we try to thumbnail it?
+	// When we come across of a file, should we try to thumbnail it?
 	mk.ShouldCreateThumb = func(root, file string) bool {
 		ok, _ := manikyr.NthSubdir(root, file, 1)
 		return ok
 	}
 
 	// Create chan to receive and print errors
-	rootErrChan := make(chan error)
+	evtChan := make(chan manikyr.Event)
+	go func(c chan manikyr.Event){
+		for {
+			evt := <-c
+			println(evt.String())
+		}
+	}(evtChan)
 
 	// Add our root directory which holds the gallery directories
-	err = mk.AddRoot(myRoot, rootErrChan)
+	err = mk.AddRoot(myRoot, evtChan)
 	if err != nil {
 		panic(err)
 	}
@@ -62,11 +69,8 @@ func main() {
 		panic(err)
 	}
 
-	println("Manikyr ready")
-	for {
-		if err := <-rootErrChan; err != nil {
-			println(err.Error())
-		}
-	}
+	// Block forever
+	done := make(chan struct{})
+	<-done
 }
 ```
